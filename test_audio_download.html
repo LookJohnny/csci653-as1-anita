@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audio Test - Download TTS Sample</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: white;
+        }
+        button {
+            padding: 15px 30px;
+            font-size: 16px;
+            margin: 10px;
+            cursor: pointer;
+            border-radius: 5px;
+            border: none;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        pre {
+            background: #000;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            background: rgba(102, 126, 234, 0.2);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔊 Edge TTS Audio Test</h1>
+    <p>This page tests if Edge TTS audio is working correctly.</p>
+
+    <div class="status" id="status">Ready to test...</div>
+
+    <button onclick="testAudio()">🎤 Test TTS (Send "Hello" to server)</button>
+    <button onclick="downloadLastAudio()">💾 Download Last Audio</button>
+
+    <h3>Console Output:</h3>
+    <pre id="console"></pre>
+
+    <script>
+        let ws = null;
+        let lastAudioBase64 = null;
+        const consoleDiv = document.getElementById('console');
+        const statusDiv = document.getElementById('status');
+
+        function log(message) {
+            console.log(message);
+            consoleDiv.textContent += message + '\n';
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+
+        function updateStatus(msg) {
+            statusDiv.textContent = msg;
+        }
+
+        // Connect to WebSocket
+        function connect() {
+            ws = new WebSocket('ws://localhost:8000/ws');
+
+            ws.onopen = () => {
+                log('[OK] Connected to server');
+                updateStatus('✅ Connected - Ready to test');
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                log(`[WS] Received: ${data.type}`);
+
+                if (data.type === 'audio') {
+                    lastAudioBase64 = data.audio;
+                    log(`[AUDIO] Received ${data.audio.length} characters of base64`);
+                    updateStatus('✅ Audio received! Click "Download Last Audio" to save it');
+
+                    // Auto-play
+                    playAudio(data.audio);
+                }
+
+                if (data.type === 'state') {
+                    log(`[STATE] ${data.value}`);
+                }
+            };
+
+            ws.onerror = (error) => {
+                log('[ERROR] WebSocket error');
+                updateStatus('❌ Connection error');
+            };
+
+            ws.onclose = () => {
+                log('[INFO] Disconnected');
+                updateStatus('❌ Disconnected - Reconnecting...');
+                setTimeout(connect, 3000);
+            };
+        }
+
+        function testAudio() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                updateStatus('❌ Not connected to server');
+                return;
+            }
+
+            log('[TEST] Sending "Hello" to server...');
+            updateStatus('⏳ Waiting for TTS response...');
+            ws.send(JSON.stringify({ type: 'user_input', text: 'Hello' }));
+        }
+
+        async function playAudio(audioBase64) {
+            try {
+                log('[PLAY] Converting base64 to audio...');
+
+                const audioData = atob(audioBase64);
+                const arrayBuffer = new ArrayBuffer(audioData.length);
+                const view = new Uint8Array(arrayBuffer);
+                for (let i = 0; i < audioData.length; i++) {
+                    view[i] = audioData.charCodeAt(i);
+                }
+
+                const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+                const audioUrl = URL.createObjectURL(blob);
+
+                log(`[PLAY] Created blob URL: ${audioUrl}`);
+
+                const audio = new Audio(audioUrl);
+                audio.volume = 1.0;
+
+                audio.addEventListener('loadeddata', () => {
+                    log(`[PLAY] Audio loaded, duration: ${audio.duration.toFixed(2)}s`);
+                });
+
+                audio.addEventListener('playing', () => {
+                    log('[PLAY] ▶️  Audio is playing!');
+                    updateStatus('🔊 Playing audio...');
+                });
+
+                audio.addEventListener('ended', () => {
+                    log('[PLAY] ✅ Audio playback complete');
+                    updateStatus('✅ Playback complete');
+                    URL.revokeObjectURL(audioUrl);
+                });
+
+                audio.addEventListener('error', (e) => {
+                    log(`[ERROR] Audio error: ${audio.error ? audio.error.code : 'unknown'}`);
+                    updateStatus('❌ Audio playback error');
+                });
+
+                await audio.play();
+                log('[PLAY] Play initiated');
+
+            } catch (error) {
+                log(`[ERROR] ${error.name}: ${error.message}`);
+                updateStatus(`❌ Error: ${error.message}`);
+            }
+        }
+
+        function downloadLastAudio() {
+            if (!lastAudioBase64) {
+                updateStatus('❌ No audio to download yet');
+                return;
+            }
+
+            try {
+                const audioData = atob(lastAudioBase64);
+                const arrayBuffer = new ArrayBuffer(audioData.length);
+                const view = new Uint8Array(arrayBuffer);
+                for (let i = 0; i < audioData.length; i++) {
+                    view[i] = audioData.charCodeAt(i);
+                }
+
+                const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `anita_voice_${Date.now()}.wav`;
+                a.click();
+                URL.revokeObjectURL(url);
+
+                log('[DOWNLOAD] Audio file saved');
+                updateStatus('✅ Audio downloaded');
+            } catch (error) {
+                log(`[ERROR] Download failed: ${error.message}`);
+            }
+        }
+
+        // Connect on page load
+        window.addEventListener('load', () => {
+            connect();
+            log('[INFO] Audio test page loaded');
+
+            // Click anywhere to activate audio
+            document.addEventListener('click', () => {
+                const silentAudio = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+                silentAudio.volume = 0;
+                silentAudio.play().catch(() => {});
+            }, { once: true });
+        });
+    </script>
+</body>
+</html>
